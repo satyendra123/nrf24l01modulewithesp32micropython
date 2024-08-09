@@ -1,0 +1,254 @@
+#step-1 MyCar.py
+from machine import Pin
+import time
+
+
+# 定义GPIO引脚
+# 控制1个电机
+p13 = Pin(13, Pin.OUT)
+p12 = Pin(12, Pin.OUT)
+# 控制1个电机
+p14 = Pin(14, Pin.OUT)
+p27 = Pin(27, Pin.OUT)
+# 控制1个电机
+p15 = Pin(15, Pin.OUT)
+p2 = Pin(2, Pin.OUT)
+# 控制1个电机
+p4 = Pin(4, Pin.OUT)
+p16 = Pin(16, Pin.OUT)
+
+
+def move_left():
+    p13.value(1)
+    p12.value(0)
+    p14.value(0)
+    p27.value(1)
+    p15.value(0)
+    p2.value(1)
+    p4.value(1)
+    p16.value(0)
+
+
+def move_right():
+    p13.value(0)
+    p12.value(1)
+    p14.value(1)
+    p27.value(0)
+    p15.value(1)
+    p2.value(0)
+    p4.value(0)
+    p16.value(1)
+
+
+def move_up():
+    p13.value(1)
+    p12.value(0)
+    p14.value(1)
+    p27.value(0)
+    p15.value(1)
+    p2.value(0)
+    p4.value(1)
+    p16.value(0)
+
+
+def move_down():
+    p13.value(0)
+    p12.value(1)
+    p14.value(0)
+    p27.value(1)
+    p15.value(0)
+    p2.value(1)
+    p4.value(0)
+    p16.value(1)
+    
+
+def stop():
+    p13.value(0)
+    p12.value(0)
+    p14.value(0)
+    p27.value(0)
+    p15.value(0)
+    p2.value(0)
+    p4.value(0)
+    p16.value(0)
+    
+    
+
+# move_up()
+# stop()
+
+"""
+move_up()
+time.sleep(2)
+move_down()
+time.sleep(2)
+move_right()
+time.sleep(2)
+move_left()
+time.sleep(2)
+stop()
+"""
+
+#EX-2 sender.py here we are using the 
+import ustruct as struct
+import utime
+from machine import Pin, SPI
+from NRF24L01 import NRF24L01
+
+
+cfg = {"spi": -1, "miso": 17, "mosi": 16, "sck": 4, "csn": 2, "ce": 15}
+
+# Addresses are in little-endian format. They correspond to big-endian
+# 0xf0f0f0f0e1, 0xf0f0f0f0d2
+pipes = (b"\xe1\xf0\xf0\xf0\xf0", b"\xd2\xf0\xf0\xf0\xf0")
+
+
+def master():
+    csn = Pin(cfg["csn"], mode=Pin.OUT, value=1)
+    ce = Pin(cfg["ce"], mode=Pin.OUT, value=0)
+
+    spi = SPI(-1, sck=Pin(cfg["sck"]), mosi=Pin(cfg["mosi"]), miso=Pin(cfg["miso"]))
+    nrf = NRF24L01(spi, csn, ce, payload_size=4)
+
+    nrf.open_tx_pipe(pipes[0])
+    nrf.open_rx_pipe(1, pipes[1])
+    nrf.stop_listening()
+    for i in range(100):
+        try:
+            nrf.send(struct.pack("i", 3))  # 用0/1/2/3分表表示上下左右命令
+        except OSError:
+            pass
+
+
+master()
+
+#EX-3 receiver code make the car move forward backward, left and right.
+import ustruct as struct
+import utime, time
+from machine import Pin, SPI
+from NRF24L01 import NRF24L01
+from micropython import const
+import MyCar
+
+_RX_POLL_DELAY = const(15)
+
+# ----------- 这里的代码变化了------start------------
+cfg = {"spi": -1, "miso": 35, "mosi": 32, "sck": 33, "csn": 25, "ce": 26}
+# ----------- 这里的代码变化了------stop------------
+
+# Addresses are in little-endian format. They correspond to big-endian
+# 0xf0f0f0f0e1, 0xf0f0f0f0d2
+pipes = (b"\xe1\xf0\xf0\xf0\xf0", b"\xd2\xf0\xf0\xf0\xf0")
+
+nrf = None
+
+
+def call_back(*argc):
+    # print(argc)
+    print("有数据...")
+    if nrf.any():
+        while nrf.any():
+            buf = nrf.recv()
+            # ----------- 这里的代码变化了------start------------
+            (move_direction, ) = struct.unpack("i", buf)
+            print("received:", move_direction)
+            if move_direction == 0:
+                MyCar.move_up()
+            elif move_direction == 1:
+                MyCar.move_down()
+            elif move_direction == 2:
+                MyCar.move_left()
+            elif move_direction == 3:
+                MyCar.move_right()
+            # ----------- 这里的代码变化了------stop------------
+            utime.sleep_ms(_RX_POLL_DELAY)
+    MyCar.stop()
+
+
+def slave():
+    global nrf
+    
+    p5 = Pin(34, Pin.IN)
+    p5.irq(trigger=Pin.IRQ_FALLING, handler=call_back)
+    
+    csn = Pin(cfg["csn"], mode=Pin.OUT, value=1)
+    ce = Pin(cfg["ce"], mode=Pin.OUT, value=0)
+
+    spi = SPI(-1, sck=Pin(cfg["sck"]), mosi=Pin(cfg["mosi"]), miso=Pin(cfg["miso"]))
+    nrf = NRF24L01(spi, csn, ce, payload_size=4)
+
+
+    nrf.open_tx_pipe(pipes[1])
+    nrf.open_rx_pipe(1, pipes[0])
+    nrf.stop_listening()
+    nrf.start_listening()
+
+    print("NRF24L01 slave mode, waiting for packets... (ctrl-C to stop)")
+
+    while True:
+        print("waiting ....")
+        time.sleep(1)
+
+
+slave()
+
+#EX-3 we can also use the joystics to send the data through the joystick\
+import ustruct as struct
+import utime
+from machine import Pin, SPI, ADC
+from NRF24L01 import NRF24L01
+import time
+
+
+cfg = {"spi": -1, "miso": 17, "mosi": 16, "sck": 4, "csn": 2, "ce": 15}
+
+# Addresses are in little-endian format. They correspond to big-endian
+# 0xf0f0f0f0e1, 0xf0f0f0f0d2
+pipes = (b"\xe1\xf0\xf0\xf0\xf0", b"\xd2\xf0\xf0\xf0\xf0")
+
+
+def main():
+
+    # PS2遥感配置相关
+    ps2_y = ADC(Pin(33))
+    ps2_y.atten(ADC.ATTN_11DB)  # 这里配置测量量程为3.3V
+    ps2_x = ADC(Pin(32))
+    ps2_x.atten(ADC.ATTN_11DB)  # 这里配置测量量程为3.3V
+    btn = Pin(23, Pin.IN, Pin.PULL_UP)
+    
+    # NRF24L01发送相关
+    csn = Pin(cfg["csn"], mode=Pin.OUT, value=1)
+    ce = Pin(cfg["ce"], mode=Pin.OUT, value=0)
+    spi = SPI(-1, sck=Pin(cfg["sck"]), mosi=Pin(cfg["mosi"]), miso=Pin(cfg["miso"]))
+    nrf = NRF24L01(spi, csn, ce, payload_size=4)
+    nrf.open_tx_pipe(pipes[0])
+    nrf.open_rx_pipe(1, pipes[1])
+    nrf.stop_listening()
+
+    while True:
+        val_y = ps2_y.read()  # 0-4095
+        val_x = ps2_x.read()  # 0-4095
+        print("x:{} y:{} btn:{}".format(val_x, val_y, btn.value()))
+        # time.sleep(0.1)
+        
+        move_num = -1
+        
+        if val_y > 2000:
+            move_num = 0
+        elif val_y < 1600:
+            move_num = 1
+
+        if val_x > 2000:
+            move_num = 3
+        elif val_x < 1600:
+            move_num = 2
+        
+        if move_num != -1:
+            try:
+                for i in range(100):
+                    nrf.send(struct.pack("i", move_num))  # 用0/1/2/3分表表示上下左右命令
+            except OSError:
+                pass
+
+
+main()
